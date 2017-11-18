@@ -381,7 +381,7 @@ def certificateRevocation():
     print art
     print "\nCertificate Revocation Script - Block SSL\n"
     print "In which of your addresses do you still have access? default: [1]\n"
-    print "\t1. All of the addresses. (Generation, Certificate, Revocation)"
+    print "\t1. All of the addresses. (Generation, Certificate, Revocation)\n"
     print "\t2. Only Certificate address.\n"
     print "\t3. Only Revocation address.\n"
     print "\t4. Revocation and Generation addresses.\n"
@@ -396,7 +396,6 @@ def certificateRevocation():
             r = requests.get(url)
             balance = r.json()
             balance = str(balance)
-            print balance
             x = 1
             i = 1
             final_balance = ""
@@ -408,7 +407,7 @@ def certificateRevocation():
                     final_balance = final_balance + balance[i]
                     i += 1
 
-            print " Your Certificate address balance is: " + final_balance
+            print "\nYour Certificate address balance is: " + final_balance
             final_balance = int(final_balance)
             #Opening Generation private key from pem file
             if os.path.isfile('./Certificate_Private.pem'):
