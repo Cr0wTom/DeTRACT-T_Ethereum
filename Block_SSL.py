@@ -13,6 +13,9 @@ import requests #pip install requests
 import traceback
 import subprocess
 import sha3 #pip install pysha3
+import rlp
+import codecs
+from ethereum import transactions
 from datetime import timedelta
 from Crypto.Cipher import AES
 from pybitcoin import BitcoinPrivateKey, make_op_return_tx, BlockchainInfoClient, send_to_address
@@ -104,7 +107,7 @@ def identityCreation():
     cert_pub = cert_pub.to_string()
     keccak.update(cert_pub)
     cert_address = keccak.hexdigest()[24:]
-    open("Gen_Address.txt", "w").write("0x" + cert_address)
+    open("Cert_Address.txt", "w").write("0x" + cert_address)
 
     print "Generating \"Revocation\" Private Key..."
     rev_priv = SigningKey.generate(curve=SECP256k1)  #Generate the "Revocation" private key
@@ -117,13 +120,13 @@ def identityCreation():
     rev_pub = rev_pub.to_string()
     keccak.update(rev_pub)
     rev_address = keccak.hexdigest()[24:]
-    open("Gen_Address.txt", "w").write("0x" + rev_address)
+    open("Rev_Address.txt", "w").write("0x" + rev_address)
 
     print "\nYour addresses are:"
     print "\nGeneration Address: 0x" + gen_address
     print "\nCertificate Address: 0x" + cert_address
     print "\nRevocation Address: 0x" + rev_address
-    os.system("echo 3 | keybase currency add --force " + cert_address + " >/dev/null 2>&1") #add cert address to keybase account
+    os.system("echo 3 | keybase currency add --force " + cert_address + " >/dev/null 2>&1") #add cert address to keybase account - (todo)
     print "\nCertificate address added to your keybase.io account.\n"
     print "\nPlease load your Generation and Revocation addresses with some ether."
     print "\nWarning: Please keep your Revocation address secret!"
@@ -246,7 +249,7 @@ def certificateCreation():
     print "\nCertificate created in file: certificate.crt"
     print "\nKeys saved in file: keys.key\n"
 
-    ans2 = raw_input("Do you have available satoshis in your Generation address? [Y]es [N]o, default: [Y]")
+    ans2 = raw_input("Do you have available ether in your Generation address? [Y]es [N]o, default: [Y]")
     if ans2 == "Y" or ans2 == "y" or ans2 == "" or ans2 == " ":
         #Opening Generation private key from pem file
         if os.path.isfile('./Generation_Private.pem'):
@@ -269,14 +272,29 @@ def certificateCreation():
             print "\nPlease place the file in the script directory or run -i option for a new key pair.\n"
             sys.exit()
         try:
+            mode = "CC: "
+            #Hashing of the certificate
+            f = open("certificate.crt", "rb") #read file in binary mode
+            fr = f.read()
+            cert_hash = hashlib.sha256() #use the SHA256 hashing algorithm
+            cert_hash.update(fr)
+            data = cert_hash.hexdigest()
+            nonce = 100
+            gas_price = 10000000000
+            gas_limit = 22000
+            value = 1000000000000000000
+            token = "48193195898942febdc67d60316ad204"
+            print "\nYour Certificate hash is: ", data
+            data = mode + data
+            print "\nAdding to Ethereum data field..."
             recipient_address = open("Cert_Address.txt", "rb").read()
-            blockchain_client = BlockchainInfoClient("dacc6a40-1b8f-4dbb-afc7-bc9657603e83")
-            send_to_address(recipient_address, 164887, sk, blockchain_client) #make a ~10$ transactrion to cert address
-            print "\nWait at least 20 minutes, and run the script with option -s to send the certificate to the blockchain."
+            recipient_address = recipient_address.strip('\n')
+            unencoded_tx = rlp.encode(transactions.Transaction(nonce, gas_price, gas_limit, recipient_address, value, data).sign(sk))
+            signedtx = '0x' + codecs.encode(unencoded_tx, 'hex').decode('utf-8')
+            os.system("curl -sd \'{\"tx\":\"" + signedtx + "\"}\' https://api.blockcypher.com/v1/eth/main/txs/push?token=" + token)
         except Exception:
             print "\nNo balance in your Generation address.\n"
             print "Please load some ether in order to submit your certificate.\n"
-
     else:
         print "Please load your Generation address and run the script again."
 
@@ -312,8 +330,50 @@ def certificateUpdate():
     ans2 = raw_input("Do you want to send your certificate to the blockchain? [Y]es [N]o, default: [Y]")
     if ans2 == "Y" or ans2 == "y" or ans2 == "" or ans2 == " ":
         i = 2
-        sendCertificate(i)
-
+        mode = "UC: "
+        #Hashing of the certificate
+        f = open("certificate.crt", "rb") #read file in binary mode
+        fr = f.read()
+        cert_hash = hashlib.sha256() #use the SHA256 hashing algorithm
+        cert_hash.update(fr)
+        data = cert_hash.hexdigest()
+        nonce = 100
+        gas_price = 10000000000
+        gas_limit = 22000
+        value = 1000000000000000000
+        token = "48193195898942febdc67d60316ad204"
+        print "\nYour Certificate hash is: ", data
+        data = mode + data
+        print "\nAdding to OP_RETURN..."
+        #Opening Generation private key from pem file
+        if os.path.isfile('./Certificate_Private.pem'):
+            print "\nCertificate Private Key file exists."
+            sk = SigningKey.from_pem(open("Certificate_Private.pem").read())
+            sk_string = sk.to_string()
+            sk = str(sk_string)
+            sk = sk.encode("hex")
+        elif os.path.isfile('./Certificate_Private.pem.enc'):
+            print "\nCertificate Private Key encoded file exists."
+            decrypt_file(key, "Certificate_Private.pem.enc")
+            print "\nDecrypting Certificate Private Key..."
+            print "Saving to Certificate_Private.pem..."
+            sk = SigningKey.from_pem(open("Certificate_Private.pem").read())
+            sk_string = sk.to_string()
+            sk = str(sk_string)
+            sk = sk.encode("hex")
+        else:
+            print "\nCertificate Private Key does not exist."
+            print "\nPlease place the file in the script directory or run -i option for a new key pair.\n"
+            sys.exit()
+        try:
+            recipient_address = open("Cert_Address.txt", "rb").read()
+            recipient_address = recipient_address.strip('\n')
+            unencoded_tx = rlp.encode(transactions.Transaction(nonce, gas_price, gas_limit, recipient_address, value, data).sign(sk))
+            signedtx = '0x' + codecs.encode(unencoded_tx, 'hex').decode('utf-8')
+            os.system("curl -sd \'{\"tx\":\"" + signedtx + "\"}\' https://api.blockcypher.com/v1/eth/main/txs/push?token=" + token)
+        except Exception:
+            print "\nNo balance in your Certificate address.\n"
+            print "Please first run the -cc or the -u script.\n"
     sys.exit()
 
 
@@ -326,25 +386,30 @@ def certificateRevocation():
     print "\t3. Only Revocation address.\n"
     print "\t4. Revocation and Generation addresses.\n"
     ans = raw_input()
-    blockchain_client = BlockchainInfoClient("dacc6a40-1b8f-4dbb-afc7-bc9657603e83")
     if ans == "1" or ans == "" or ans == " " or ans == "2":
         address = open("Cert_Address.txt", "r").read()
         address = address.strip()
-        url = "https://blockchain.info/balance?format=json&active=" + address
-        r = requests.get(url)
+        if address[1] == "x":
+            address = address.split("0x")[1]
+        url = "https://api.blockcypher.com/v1/eth/main/addrs/" + address + "/balance"
         try:
-            balance = r.json()[address]
+            r = requests.get(url)
+            balance = r.json()
             balance = str(balance)
+            print balance
             x = 1
-            i = 19
+            i = 1
             final_balance = ""
+            balance = balance.split("\'final_balance\':")[1]
             while x == 1:
-                if balance[i] == ",":
+                if balance[i] == "L" or balance[i] == ",":
                     x += 1
                 else:
                     final_balance = final_balance + balance[i]
                     i += 1
+
             print " Your Certificate address balance is: " + final_balance
+            final_balance = int(final_balance)
             #Opening Generation private key from pem file
             if os.path.isfile('./Certificate_Private.pem'):
                 print "\nCertificate Private Key file exists."
@@ -366,25 +431,25 @@ def certificateRevocation():
                 print "\nPlease place the .pem file in the script directory.\n"
                 sys.exit()
         except ValueError, e:
-            raise Exception('Invalid response from blockchain.info.')
+            raise Exception('Invalid response from Blockcypher.')
         if ans == "1" or ans == "" or ans == " ":
             recepient_address = open("Gen_Address.txt", "rb").read()
             ans3 = raw_input("Which is your revocation reason?\n")
-            size = len(ans3)
-            while size > 75:
-                print "String too long for OP_RETURN transaction, please repeat.\n"
-                ans3 = raw_input("Which is your revocation reason?\n")
-                size = len(ans3)
             data = "R1: " + ans3
         else:
             recepient_address = raw_input("Give the address that you want to sent the certificate balance, for revocation purposes:\n")
             data = "R2: No access to Generation address"
             #todo - check if the address is correct
         try:
-            tx = make_op_return_tx(data, sk, blockchain_client, fee=1000, format='bin')
-            broadcast_transaction(tx, blockchain_client)
-            final_balance = final_balance - 1000
-            send_to_address(recipient_address, final_balance, sk, blockchain_client)
+            nonce = 100
+            gas_price = 10000000000
+            gas_limit = 22000
+            value = final_balance
+            token = "48193195898942febdc67d60316ad204"
+            recipient_address = recipient_address.strip('\n')
+            unencoded_tx = rlp.encode(transactions.Transaction(nonce, gas_price, gas_limit, recipient_address, value, data).sign(sk))
+            signedtx = '0x' + codecs.encode(unencoded_tx, 'hex').decode('utf-8')
+            os.system("curl -sd \'{\"tx\":\"" + signedtx + "\"}\' https://api.blockcypher.com/v1/eth/main/txs/push?token=" + token)
         except Exception:
             print "\nNo balance in your Certificate address.\n"
             print "If the Certificate address has 0 balance, it has been already been revoced.\n"
@@ -419,11 +484,17 @@ def certificateRevocation():
             data = "ER2: No Access to Certificate address"
         #send all the balance to given address address
         print "\nYour revocation reason is: ", data
-        print "\nAdding revocation reason to OP_RETURN..."
+        print "\nAdding revocation reason to Ethereum data field..."
         try:
-            send_to_address(recipient_address, 10000, sk, blockchain_client)
-            tx = make_op_return_tx(data, sk, blockchain_client, fee=1000, format='bin')
-            broadcast_transaction(tx, blockchain_client)
+            nonce = 100
+            gas_price = 10000000000
+            gas_limit = 22000
+            value = 1000000000000000000
+            token = "48193195898942febdc67d60316ad204"
+            recipient_address = recipient_address.strip('\n')
+            unencoded_tx = rlp.encode(transactions.Transaction(nonce, gas_price, gas_limit, recipient_address, value, data).sign(sk))
+            signedtx = '0x' + codecs.encode(unencoded_tx, 'hex').decode('utf-8')
+            os.system("curl -sd \'{\"tx\":\"" + signedtx + "\"}\' https://api.blockcypher.com/v1/eth/main/txs/push?token=" + token)
         except Exception:
             print "\nNo balance in your Revocation address.\n"
             print "Please load some ether in order to submit your revocation reason.\n"
@@ -475,53 +546,6 @@ def createCert(k, cert):
     cert.set_pubkey(k)
     cert.sign(k, 'sha256')
     return cert
-
-
-def sendCertificate(i):
-    if i == 1:
-        ans = raw_input("Do you want to Create or Update your certificate? [C]reate [U]pdate, default: [C]")
-        if ans == "C" or ans == "c" or ans == "" or ans == " ":
-            mode = "CC: "
-        else:
-            mode = "UC: "
-    elif i == 2:
-        mode = "UC: "
-    #Hashing of the certificate
-    f = open("certificate.crt", "rb") #read file in binary mode
-    fr = f.read()
-    cert_hash = hashlib.sha256() #use the SHA256 hashing algorithm
-    cert_hash.update(fr)
-    data = cert_hash.hexdigest()
-    print "\nYour Certificate hash is: ", data
-    data = mode + data
-    print "\nAdding to OP_RETURN..."
-    #Opening Generation private key from pem file
-    if os.path.isfile('./Certificate_Private.pem'):
-        print "\nCertificate Private Key file exists."
-        sk = SigningKey.from_pem(open("Certificate_Private.pem").read())
-        sk_string = sk.to_string()
-        sk = str(sk_string)
-        sk = sk.encode("hex")
-    elif os.path.isfile('./Certificate_Private.pem.enc'):
-        print "\nCertificate Private Key encoded file exists."
-        decrypt_file(key, "Certificate_Private.pem.enc")
-        print "\nDecrypting Certificate Private Key..."
-        print "Saving to Certificate_Private.pem..."
-        sk = SigningKey.from_pem(open("Certificate_Private.pem").read())
-        sk_string = sk.to_string()
-        sk = str(sk_string)
-        sk = sk.encode("hex")
-    else:
-        print "\nCertificate Private Key does not exist."
-        print "\nPlease place the file in the script directory or run -i option for a new key pair.\n"
-        sys.exit()
-    try:
-        blockchain_client = BlockchainInfoClient("dacc6a40-1b8f-4dbb-afc7-bc9657603e83")
-        tx = make_op_return_tx(data, sk, blockchain_client, fee=10000, format='bin')
-        broadcast_transaction(tx, blockchain_client)
-    except Exception:
-        print "\nNo balance in your Certificate address.\n"
-        print "Please first run the -cc or the -u script.\n"
 
 
 def encrypt_file(key, in_filename, out_filename=None, chunksize=64*4096):
